@@ -41,7 +41,7 @@
     "guardian": {
       "name": "Le gardien de cuivre",
       "hp": 6,
-      "damage": 2
+      "damage": 4
     }
   },
   "objects": {

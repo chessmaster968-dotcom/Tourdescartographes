@@ -33,7 +33,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;background:linear-grad
 </head>
 <body>
 <main>
-<header><strong>✦ La Tour des Cartographes</strong><nav aria-label="Modes"><button class="quiet" id="journal">Carnet</button><button class="quiet" id="open-inventory" aria-haspopup="dialog">Inventaire</button><button class="quiet" id="open-editor">Atelier du MJ</button></nav></header>
+<header><strong>✦ La Tour des Cartographes</strong><nav aria-label="Modes"><button class="quiet" id="journal">Carnet</button><button class="quiet" id="open-inventory" aria-haspopup="dialog">Inventaire</button><button class="quiet" id="reset-adventure" type="button" disabled>Recommencer l’aventure</button><button class="quiet" id="open-editor">Atelier du MJ</button></nav></header>
 <div class="stats" id="stats" hidden></div>
 <section class="scene">
 <div class="art" id="art" aria-hidden="true"></div>
@@ -702,6 +702,11 @@ byId('close-editor').onclick = () => {
   render();
   byId('open-editor').focus();
 };
+byId('reset-adventure').onclick = () => {
+  if (!window.confirm('Recommencer au camp ? Les objets et la progression de la partie en cours seront réinitialisés.')) return;
+  run = save.run = freshRun();
+  render(true);
+};
 byId('open-editor').onclick = () => {
   const draft = readLocalScenario();
   byId('restore-local-draft').hidden = !draft || JSON.stringify(draft) === JSON.stringify(scenario);
@@ -902,6 +907,7 @@ async function initialize() {
   if (!roomIds().includes(run.scene)) run = save.run = freshRun();
   render();
   byId('open-editor').disabled = false;
+  byId('reset-adventure').disabled = false;
 }
 byId('open-editor').disabled = true;
 initialize();

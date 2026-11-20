@@ -29,6 +29,18 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;background:linear-grad
 .item-icon{display:grid;place-items:center;width:66px;height:66px;border:1px solid #947952;border-radius:12px;background:radial-gradient(ellipse at top,#634e36,#27302a);font-size:36px;line-height:1}
 .item-name{font-size:.9rem;color:#f5dfb5}
 #room-items-panel{margin-top:10px}#item-fields{margin-top:10px}.item-description{font-size:.85rem;white-space:pre-line}#item-feedback:empty{display:none}
+.combat-board{margin:1rem 0}
+.combatants{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.combatant{padding:12px;border:1px solid #63857b;border-radius:12px;background:#172e29;overflow-wrap:anywhere}
+.combatant.enemy{border-color:#a67263;background:#382821}
+.combatant h2{margin:0 0 6px;font:700 1rem system-ui,sans-serif}
+.combat-portrait{display:block;font-size:2.4rem;line-height:1.2;margin-bottom:6px}
+.combatant progress{display:block;width:100%;height:9px;margin-top:5px;accent-color:#9ee2bc}
+.combatant.enemy progress{accent-color:#eca393}
+.combatant ul{margin:8px 0 0;padding-left:0;list-style:none;font-size:.85rem}
+.combat-plan{margin:10px 0 0;padding:10px 12px;border-left:3px solid #f2d195;background:#24372e}
+.combat-plan span{display:block}
+.combat-plan span+span{margin-top:4px}
 </style>
 </head>
 <body>
@@ -42,6 +54,20 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;background:linear-grad
 <h1 id="title" tabindex="-1"></h1>
 <p class="transition" id="message" role="status"></p>
 <p id="story"></p>
+<section class="combat-board" id="combat-board" aria-label="Combat" hidden>
+<div class="combatants">
+<section class="combatant" aria-labelledby="hero-name">
+<span class="combat-portrait" aria-hidden="true">🧝</span><h2 id="hero-name">Toi</h2>
+<strong id="hero-life"></strong><progress id="hero-health" aria-label="Vie du héros"></progress>
+<ul id="combat-items" aria-label="Tes objets et compagnons"></ul>
+</section>
+<section class="combatant enemy" aria-labelledby="monster-name">
+<span class="combat-portrait" id="monster-portrait" aria-hidden="true"></span><h2 id="monster-name"></h2>
+<strong id="monster-life"></strong><progress id="monster-health" aria-label="Vie du monstre"></progress>
+</section>
+</div>
+<p class="combat-plan" role="status"><span id="monster-intent"></span><span id="combat-tip"></span></p>
+</section>
 <div class="choices" id="choices"></div>
 </div>
 </section>
@@ -190,12 +216,18 @@ const puzzles = [
   { question: 'Les cadrans affichent 2, 5, 9, 14. Quel nombre faut-il entrer ensuite ?', hint: 'Observe de combien le nombre augmente à chaque fois.', choices: [18, 20, 21], answer: 20 },
   { question: 'La lune vient juste après le soleil. L’étoile est en dernier. Quel symbole vient en premier ?', hint: 'Place d’abord l’étoile, puis les deux autres symboles côte à côte.', choices: ['La lune', 'L’étoile', 'Le soleil'], answer: 'Le soleil' }
 ];
+function combatTurn(guard) {
+  const monster = scenario.monsters[guard ? 'guardian' : 'sentry'];
+  const phase = run.turn % (guard ? 3 : 2);
+  return {
+    hit: guard ? [monster.damage, 0, 1][phase] : [0, monster.damage][phase],
+    strike: (guard ? phase === 1 : phase === 0) ? 3 : 1
+  };
+}
 function combat(action) {
   const guard = run.scene === 'guardian';
-  const monster = scenario.monsters[guard ? 'guardian' : 'sentry'];
-  const hit = guard ? [monster.damage, 0, 1][run.turn % 3] : [0, monster.damage][run.turn % 2];
-  const exposed = guard ? run.turn % 3 === 1 : run.turn % 2 === 0;
-  if (action === 'strike') run.enemy -= exposed ? 3 : 1;
+  const {hit, strike} = combatTurn(guard);
+  if (action === 'strike') run.enemy -= strike;
   if (run.enemy <= 0) {
     const finish = action === 'item' ? 'Le ressort se détend d’un coup.' : 'Ton dernier coup atteint le mécanisme.';
     enter(guard ? 'win' : 'pip', finish + (guard
@@ -211,9 +243,9 @@ function combat(action) {
   }
   run.turn++;
   const result = action === 'strike'
-    ? (exposed ? 'Ta lame se glisse entre deux plaques de cuivre. 3 dégâts.' : 'Ta lame ricoche sur le cuivre. 1 dégât.')
+    ? 'Tu retires ' + strike + (strike === 1 ? ' point de vie au monstre.' : ' points de vie au monstre.')
     : action === 'item' ? 'Le ressort jaillit et frappe le mécanisme. ' + scenario.objects.spring.power + ' dégâts.'
-    : 'Tu recules et lèves ton épée devant toi.';
+    : 'Tu te protèges et attends la suite.';
   run.message = result + (damage ? ' Tu perds ' + damage + (damage === 1 ? ' cœur.' : ' cœurs.') : hit ? ' Tu bloques le coup.' : '');
 }
 const option = (label, act, detail) => ({ label, act, detail });
@@ -286,12 +318,12 @@ function encounter(guard) {
       option('Poursuivre', () => enter(guard ? 'win' : 'pip', 'Tu empruntes le passage désormais libre.'))
     ]];
   }
-  const intention = guard
-    ? ['Il prépare un grand coup. Protège-toi !', 'Il récupère. C’est le moment de frapper.', 'Il prépare un petit coup.'][run.turn % 3]
-    : ['Elle remonte son ressort. C’est le moment de frapper.', 'Elle prépare un bond. Protège-toi !'][run.turn % 2];
+  const {hit, strike} = combatTurn(guard);
   const actions = [
-    option('Frapper', () => combat('strike')),
-    option('Se protéger', () => combat('defend'))
+    option('⚔️ Attaquer', () => combat('strike'), 'Tu retires ' + strike + ' PV au monstre.'),
+    option('🛡️ Se protéger', () => combat('defend'), hit
+      ? 'Tu bloques le coup et gardes tous tes cœurs.'
+      : 'Tu attends un tour sans attaquer.')
   ];
   if (guard && run.ally) actions.unshift(option('Demander à Pip d’actionner le levier', () => enter('win', 'Pip se faufile derrière le gardien. « Celui-ci, je le connais. » Il abaisse le levier. Le gardien se fige et la porte s’entrouvre.'), 'Pip connaît le mécanisme du gardien.'));
   if (guard && run.lantern) actions.unshift(option('Éclairer la serrure du gardien', () => enter('win', 'Dans la lumière bleue, trois symboles apparaissent sur la serrure. Tu les effleures dans l’ordre de leurs pulsations. Les verrous cèdent un à un.'), 'La lumière bleue révèle les symboles qui ouvrent la porte.'));
@@ -301,7 +333,7 @@ function encounter(guard) {
     combat('item');
   }, 'Inflige ' + scenario.objects.spring.power + ' dégâts. Le gardien joue son tour s’il tient encore debout.'));
   return [guard ? 'Le sommet · Devant la porte' : 'L’atelier · Près de l’établi', scenario.monsters[guard ? 'guardian' : 'sentry'].name,
-    (guard && run.unprepared ? 'Golem cuirassé · ' : '') + 'Énergie adverse : ' + run.enemy + '. ' + intention, guard ? '🦉' : '⚙️', actions];
+    '', guard ? '🦉' : '⚙️', actions];
 }
 scenes.sentry = () => encounter(false);
 scenes.guardian = () => encounter(true);
@@ -431,7 +463,7 @@ function roomView() {
   if (custom) {
     view[1] = custom.title;
     view[2] = custom.story;
-    if (['sentry','guardian','puzzle'].includes(run.scene)) view[2] += ' ' + scenes[run.scene]()[2];
+    if (run.scene === 'puzzle') view[2] += ' ' + scenes[run.scene]()[2];
   }
   for (const link of scenario.passages) {
     if (link.from === run.scene && editableLinks(link.from) && (!link.requires || run[link.requires])) {
@@ -789,13 +821,58 @@ byId('import-scenario').onchange = async event => {
   event.target.value = '';
 };
 
+function inventoryItems() {
+  const items = [['⚔️', 'Épée']];
+  if (run.lantern) items.push(['🏮', scenario.objects.lantern.name]);
+  if (run.spring) items.push(['🌀', scenario.objects.spring.name]);
+  for (const item of run.pickedItems ?? []) items.push([item.icon, item.name, item.description]);
+  return items;
+}
+function renderCombat() {
+  const active = ['sentry', 'guardian'].includes(run.scene) && run.enemy > 0;
+  byId('combat-board').hidden = !active;
+  if (!active) return false;
+
+  const guard = run.scene === 'guardian';
+  const monster = scenario.monsters[run.scene];
+  const {hit, strike} = combatTurn(guard);
+  const maxEnemyLife = Math.max(run.enemy, monster.hp + (guard && run.unprepared ? 2 : 0));
+  const life = (id, current, max) => {
+    byId(id + '-life').textContent = current + ' / ' + max + ' PV';
+    const bar = byId(id + '-health');
+    bar.max = max;
+    bar.value = current;
+  };
+  life('hero', run.hp, 7);
+  life('monster', run.enemy, maxEnemyLife);
+  byId('monster-name').textContent = scenario.rooms[run.scene]?.title || monster.name;
+  byId('monster-portrait').textContent = guard ? '🗿' : '🤖';
+
+  const items = inventoryItems();
+  if (run.ally) items.push(['🤖', 'Pip']);
+  byId('combat-items').replaceChildren(...items.map(([icon, name]) => {
+    const item = document.createElement('li');
+    item.textContent = icon + ' ' + name;
+    return item;
+  }));
+
+  byId('monster-intent').textContent = hit
+    ? 'Le monstre prépare un coup. Il peut te retirer ' + hit + (hit === 1 ? ' cœur.' : ' cœurs.')
+    : 'Le monstre se prépare. Il ne t’attaquera pas ce tour.';
+  byId('combat-tip').textContent = run.enemy <= strike
+    ? 'Attaque ! Tu peux le battre avant qu’il riposte.'
+    : hit ? 'Conseil : protège-toi pour bloquer son coup.' : 'Conseil : profite de la pause pour attaquer !';
+  return true;
+}
 function render(focus = false) {
   const [where, title, story, glyph, options] = roomView();
   byId('where').textContent = where;
   byId('title').textContent = title;
   byId('story').textContent = story;
   byId('message').textContent = run.message;
+  const inCombat = renderCombat();
   const art = byId('art');
+  art.style.display = inCombat ? 'none' : '';
   art.dataset.scene = run.scene;
   art.replaceChildren();
   if (run.scene !== 'camp') {
@@ -805,8 +882,8 @@ function render(focus = false) {
     art.append(icon);
   }
   const stats = byId('stats');
-  stats.style.display = run.scene === 'camp' ? 'none' : 'flex';
-  stats.hidden = run.scene === 'camp';
+  stats.hidden = inCombat || run.scene === 'camp';
+  stats.style.display = stats.hidden ? 'none' : 'flex';
   const hearts = document.createElement('span');
   hearts.className = 'hearts';
   hearts.setAttribute('aria-label', run.hp + ' cœurs');
@@ -855,15 +932,9 @@ byId('close-inventory').addEventListener('click', () => {
   byId('open-inventory').focus();
 });
 byId('open-inventory').addEventListener('click', () => {
-  const items = [['⚔️', 'Épée']];
-  if (run.lantern) items.push(['🏮', scenario.objects.lantern.name]);
-  if (run.spring) items.push(['🌀', scenario.objects.spring.name]);
-
-  for (const item of run.pickedItems ?? []) items.push([item.icon, item.name, item.description]);
-
   const list = byId('inventory-items');
   list.replaceChildren();
-  for (const [symbol, name, description] of items) {
+  for (const [symbol, name, description] of inventoryItems()) {
     const card = document.createElement('li');
     const icon = document.createElement('span');
     icon.className = 'item-icon';

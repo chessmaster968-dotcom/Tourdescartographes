@@ -228,7 +228,9 @@ const scenes = {
     option('Entrer dans la bibliothèque', () => { run.path = 'Bibliothèque'; enter('library'); }, 'Une lampe bleue brille derrière la vitre.')
   ]],
   workshop: () => ['L’atelier', 'La sentinelle à ressort', 'Une sentinelle tourne autour d’un petit automate pris sous une roue dentée. Elle bondit dès qu’on s’approche.', '⚙️', [
-    option('Affronter la sentinelle', () => { enter('sentry'); }),
+    run.encounters?.sentry?.enemy === 0 || run.ally
+      ? option(run.ally ? 'Rejoindre le palier avec Pip' : 'Retourner près de Pip', () => enter(run.ally ? 'treasure' : 'pip'))
+      : option('Affronter la sentinelle', () => enter('sentry')),
     option('Grimper par l’échelle', () => enter('treasure'), 'Tu peux passer sans combattre.')
   ]],
   library: () => ['La bibliothèque', 'Le coffre à cadrans', 'Un coffre dépasse d’une étagère. Sa serrure a l’air de préférer les bonnes réponses aux clés.', '📚', [
@@ -250,8 +252,17 @@ const scenes = {
     answers.push(option('Laisser le coffre', () => enter('treasure')));
     return ['La bibliothèque · Devant le coffre', 'Le bon réglage', puzzle.question + (run.hint ? ' Indice : ' + puzzle.hint : ''), '🔐', answers];
   },
-  pip: () => ['L’atelier', 'Un ami de cuivre', 'Sous la roue, un petit automate lève la main. « Je m’appelle Pip. Si tu me sors de là, je t’accompagne. »', '🤖', [
-    option('Soulever la roue pour libérer Pip', () => { run.ally = true; remember('ally'); enter('treasure', 'La roue se soulève juste assez pour que Pip se dégage. « Je te suis », dit-il avant de grimper derrière toi.'); }),
+  pip: () => ['L’atelier', 'Un ami de cuivre', run.ally
+    ? 'Pip réajuste ses engrenages. « Je te suis. On monte ou on explore l’autre porte ? »'
+    : 'Sous la roue, un petit automate lève la main. « Je m’appelle Pip. Si tu me sors de là, je t’accompagne. »', '🤖', run.ally ? [
+    option('Monter au palier avec Pip', () => enter('treasure')),
+    option('Revenir au vestibule avec Pip', () => enter('doors', 'Pip descend à tes côtés. Dans le vestibule, la porte de la bibliothèque est toujours entrouverte.'))
+  ] : [
+    option('Soulever la roue pour libérer Pip', () => {
+      run.ally = true;
+      remember('ally');
+      run.message = 'La roue se soulève. Pip se dégage et se hisse sur ton épaule.';
+    }),
     option('Poursuivre vers le sommet', () => enter('treasure'))
   ]],
   treasure: () => ['Le palier', 'Le coffre du voyageur', 'Le coffre contient deux objets. Le mécanisme ne te laisse prendre qu’un seul trésor.', '🧰', [
@@ -294,9 +305,9 @@ scenes.guardian = () => encounter(true);
 const scenarioKey = 'tour-scenario-salle-secrete-v1';
 const builtIn = Object.keys(scenes);
 const baseLinks = {
-  camp:['doors'], doors:['workshop','library'], workshop:['sentry','treasure'],
-  sentry:['pip'], pip:['treasure'], library:['puzzle','treasure'], puzzle:['treasure'],
-  treasure:['guardian'], guardian:['win','lost'], win:['camp','doors'], lost:['doors']
+  camp:['doors'], doors:['workshop','library'], workshop:['sentry','treasure','pip'],
+  sentry:['pip'], pip:['treasure','doors'], library:['puzzle','treasure'], puzzle:['treasure'],
+  treasure:['guardian','doors'], guardian:['win','lost'], win:['camp','doors'], lost:['doors']
 };
 const defaults = {
   "version": 1,
@@ -430,6 +441,11 @@ function roomView() {
       run.message = 'Tu ranges cet objet dans ton inventaire : ' + item.name + '.';
     }, item.description));
   }
+  if (run.scene === 'treasure') {
+    view[4].push(option('Redescendre au vestibule', () => enter('doors', run.ally
+      ? 'Pip te suit dans l’escalier jusqu’au vestibule.'
+      : 'Tu redescends au vestibule. L’atelier et la bibliothèque sont toujours accessibles.')));
+  }
   const previousIndex = previousRoomIndex();
   if (previousIndex !== -1) view[4].push(option('← Salle précédente', () => goBack(previousIndex)));
   return view;
@@ -508,7 +524,7 @@ function renderMap() {
   for (const [from,targets] of Object.entries(baseLinks)) {
     for (const to of targets) {
       if (['win','lost'].includes(from)) continue;
-      connect(from,to,'normal');
+      connect(from,to,to === 'doors' ? 'return' : 'normal');
     }
   }
   scenario.passages.forEach((link,index) => connect(link.from,link.to,link.requires ? 'locked' : 'added',index));

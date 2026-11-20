@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "rooms": {},
+  "passages": [],
+  "monsters": {
+    "sentry": {
+      "name": "La sentinelle à ressort",
+      "hp": 4,
+      "damage": 2
+    },
+    "guardian": {
+      "name": "Le gardien de cuivre",
+      "hp": 6,
+      "damage": 2
+    }
+  },
+  "objects": {
+    "lantern": {
+      "name": "Lanterne bleue"
+    },
+    "spring": {
+      "name": "Ressort de combat",
+      "power": 3
+    },
+    "apple": {
+      "name": "Pomme dorée",
+      "power": 2
+    }
+  }
+}

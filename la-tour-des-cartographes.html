@@ -58,6 +58,9 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;background:linear-grad
 <div class="editor-actions">
 <button class="quiet" id="play-test">Tester depuis le départ</button>
 <button class="quiet" id="export-scenario">Exporter le scénario</button>
+<button class="quiet" id="copy-scenario" type="button">Copier le JSON</button>
+<a href="https://github.com/chessmaster968-dotcom/Tourdescartographes/edit/main/la-tour-scenario.json" target="_blank" rel="noopener noreferrer">Modifier le JSON sur GitHub</a>
+<button class="quiet" id="restore-local-draft" type="button" hidden>Reprendre le brouillon local</button>
 <label class="file-label">Importer un scénario<input type="file" accept=".json,application/json" id="import-scenario"></label>
 </div>
 <p id="editor-status" role="status">Clique sur une salle pour modifier sa fiche.</p>
@@ -406,7 +409,11 @@ function validate(data) {
   return data;
 }
 let scenario = copy(defaults);
-try { scenario = validate(JSON.parse(localStorage.getItem(scenarioKey))); } catch {}
+function readLocalScenario() {
+  try { return validate(JSON.parse(localStorage.getItem(scenarioKey))); } catch { return null; }
+}
+const localFile = location.protocol === 'file:';
+if (localFile) scenario = readLocalScenario() ?? scenario;
 function saveScenario() {
   try { localStorage.setItem(scenarioKey, JSON.stringify(scenario)); return true; } catch { return false; }
 }
@@ -695,7 +702,30 @@ byId('close-editor').onclick = () => {
   render();
   byId('open-editor').focus();
 };
-byId('open-editor').onclick = () => { renderEditor(); editor.showModal(); };
+byId('open-editor').onclick = () => {
+  const draft = readLocalScenario();
+  byId('restore-local-draft').hidden = !draft || JSON.stringify(draft) === JSON.stringify(scenario);
+  renderEditor();
+  editor.showModal();
+};
+byId('restore-local-draft').onclick = () => {
+  const draft = readLocalScenario();
+  if (!draft) return;
+  scenario = draft;
+  if (!roomIds().includes(run.scene)) run = save.run = freshRun();
+  selectedRoom = 'doors';
+  byId('restore-local-draft').hidden = true;
+  renderEditor();
+  byId('editor-status').textContent = 'Brouillon local chargé.';
+};
+byId('copy-scenario').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(scenario, null, 2) + '\n');
+    byId('editor-status').textContent = 'JSON copié. Colle-le dans le fichier GitHub puis enregistre le commit.';
+  } catch {
+    byId('editor-status').textContent = 'Utilise « Exporter le scénario » pour récupérer le JSON.';
+  }
+};
 byId('save-room-button').onclick = () => {
   const input = byId('room-title');
   const title = input.value.trim();
@@ -753,7 +783,6 @@ byId('import-scenario').onchange = async event => {
   } catch (error) { byId('editor-status').textContent = error.message; }
   event.target.value = '';
 };
-if (!roomIds().includes(run.scene)) run = save.run = freshRun();
 
 function render(focus = false) {
   const [where, title, story, glyph, options] = roomView();
@@ -860,7 +889,22 @@ byId('journal').addEventListener('click', () => {
   }
   byId('notebook').showModal();
 });
-render();
+async function initialize() {
+  if (!localFile) {
+    try {
+      const response = await fetch('./la-tour-scenario.json', {cache: 'no-store'});
+      if (!response.ok) throw Error('Scénario indisponible.');
+      scenario = validate(await response.json());
+    } catch {
+      run.message = 'Scénario publié indisponible. La version intégrée au jeu est chargée.';
+    }
+  }
+  if (!roomIds().includes(run.scene)) run = save.run = freshRun();
+  render();
+  byId('open-editor').disabled = false;
+}
+byId('open-editor').disabled = true;
+initialize();
 </script>
 </body>
 </html>

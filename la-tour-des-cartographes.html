@@ -149,9 +149,16 @@ const passages = {
   'pip/treasure': 'Tu reprends l’échelle. En dessous, les engrenages ralentissent jusqu’à s’immobiliser.',
   'win/camp': 'Tu ranges le fragment dans ton carnet et redescends. Entre les arbres, les braises du camp rougeoient encore.'
 };
+const shieldItemId = 'objet-mwp30tzn-0jikptz7uz2l';
+const hasShield = () => run.pickedItems?.some(item => item.id === shieldItemId) ?? false;
+const shieldRequired = 'Il te faut le bouclier de la salle secrète pour affronter le gardien.';
 const hasGuardianAid = () => run.ally || run.lantern || run.spring;
 function enter(scene, transition, {usedApple = false} = {}) {
   const previous = run.scene;
+  if (!hasShield() && (scene === 'guardian' || (scene === 'win' && previous === 'guardian'))) {
+    run.message = shieldRequired;
+    return;
+  }
   const trail = run.trail ??= ['camp', ...(previous === 'camp' ? [] : [previous])];
   if (previous !== scene) {
     if (['sentry', 'guardian'].includes(previous)) {
@@ -219,14 +226,17 @@ const puzzles = [
 function combatTurn(guard) {
   const monster = scenario.monsters[guard ? 'guardian' : 'sentry'];
   const phase = run.turn % (guard ? 3 : 2);
+  const hit = guard ? [monster.damage, 0, 1][phase] : [0, monster.damage][phase];
+  const blocked = Math.min(hit, hasShield() ? 3 : 1);
   return {
-    hit: guard ? [monster.damage, 0, 1][phase] : [0, monster.damage][phase],
+    hit,
+    blocked,
     strike: (guard ? phase === 1 : phase === 0) ? 3 : 1
   };
 }
 function combat(action) {
   const guard = run.scene === 'guardian';
-  const {hit, strike} = combatTurn(guard);
+  const {hit, blocked, strike} = combatTurn(guard);
   if (action === 'strike') run.enemy -= strike;
   if (run.enemy <= 0) {
     const finish = action === 'item' ? 'Le ressort se détend d’un coup.' : 'Ton dernier coup atteint le mécanisme.';
@@ -235,7 +245,7 @@ function combat(action) {
       : ' La sentinelle vacille. Derrière elle, une petite main de cuivre dépasse de la roue.'));
     return;
   }
-  const damage = action === 'defend' ? 0 : hit;
+  const damage = action === 'defend' ? hit - blocked : hit;
   run.hp -= damage;
   if (run.hp <= 0) {
     enter('lost', 'Le choc te fait lâcher ton épée. Tu la ramasses et redescends en t’appuyant contre le mur, jusqu’à retrouver la lumière du camp.');
@@ -245,8 +255,9 @@ function combat(action) {
   const result = action === 'strike'
     ? 'Tu retires ' + strike + (strike === 1 ? ' point de vie au monstre.' : ' points de vie au monstre.')
     : action === 'item' ? 'Le ressort jaillit et frappe le mécanisme. ' + scenario.objects.spring.power + ' dégâts.'
+    : hit ? (hasShield() ? 'Ton bouclier' : 'Ta parade à l’épée') + ' bloque ' + blocked + ' point' + (blocked > 1 ? 's' : '') + ' du coup.'
     : 'Tu te protèges et attends la suite.';
-  run.message = result + (damage ? ' Tu perds ' + damage + (damage === 1 ? ' cœur.' : ' cœurs.') : hit ? ' Tu bloques le coup.' : '');
+  run.message = result + (damage ? ' Tu perds ' + damage + (damage === 1 ? ' cœur.' : ' cœurs.') : action === 'defend' && hit ? ' Tu gardes tous tes cœurs.' : '');
 }
 const option = (label, act, detail) => ({ label, act, detail });
 function start(keepCampItems = false) {
@@ -312,17 +323,25 @@ const scenes = {
   lost: () => ['Le camp', 'La tour reste ouverte', 'Tu regagnes le camp. Ton carnet t’attend avec les découvertes de l’expédition. La tour, elle, a encore des secrets.', '⛺', [option('Retenter l’expédition', start)]]
 };
 function encounter(guard) {
+  if (guard && !hasShield()) {
+    return ['Le sommet', scenario.monsters.guardian.name, shieldRequired, '🗿', [
+      option('Redescendre au vestibule', () => enter('doors', 'Tu redescends chercher le bouclier.'))
+    ]];
+  }
   if (run.enemy <= 0) {
     const monster = scenario.monsters[guard ? 'guardian' : 'sentry'];
     return [guard ? 'Le sommet' : 'L’atelier', monster.name, 'Le passage est libre.', guard ? '🦉' : '⚙️', [
       option('Poursuivre', () => enter(guard ? 'win' : 'pip', 'Tu empruntes le passage désormais libre.'))
     ]];
   }
-  const {hit, strike} = combatTurn(guard);
+  const {hit, blocked, strike} = combatTurn(guard);
+  const defense = hasShield() ? '🛡️ Lever le bouclier' : '⚔️ Parer à l’épée';
+  const remaining = hit - blocked;
+  const protection = blocked + ' point' + (blocked > 1 ? 's bloqués.' : ' bloqué.');
   const actions = [
     option('⚔️ Attaquer', () => combat('strike'), 'Tu retires ' + strike + ' PV au monstre.'),
-    option('🛡️ Se protéger', () => combat('defend'), hit
-      ? 'Tu bloques le coup et gardes tous tes cœurs.'
+    option(defense, () => combat('defend'), hit
+      ? protection + (remaining ? ' Tu perds quand même ' + remaining + (remaining > 1 ? ' cœurs.' : ' cœur.') : ' Tu gardes tous tes cœurs.')
       : 'Tu attends un tour sans attaquer.')
   ];
   if (guard && run.ally) actions.unshift(option('Demander à Pip d’actionner le levier', () => enter('win', 'Pip se faufile derrière le gardien. « Celui-ci, je le connais. » Il abaisse le levier. Le gardien se fige et la porte s’entrouvre.'), 'Pip connaît le mécanisme du gardien.'));
@@ -464,6 +483,10 @@ function roomView() {
     view[1] = custom.title;
     view[2] = custom.story;
     if (run.scene === 'puzzle') view[2] += ' ' + scenes[run.scene]()[2];
+  }
+  if (run.scene === 'treasure' && !hasShield()) {
+    view[2] += ' ' + shieldRequired;
+    view[4] = [];
   }
   for (const link of scenario.passages) {
     if (link.from === run.scene && editableLinks(link.from) && (!link.requires || run[link.requires])) {
@@ -829,7 +852,7 @@ function inventoryItems() {
   return items;
 }
 function renderCombat() {
-  const active = ['sentry', 'guardian'].includes(run.scene) && run.enemy > 0;
+  const active = (run.scene === 'sentry' || (run.scene === 'guardian' && hasShield())) && run.enemy > 0;
   byId('combat-board').hidden = !active;
   if (!active) return false;
 
@@ -861,7 +884,7 @@ function renderCombat() {
     : 'Le monstre se prépare. Il ne t’attaquera pas ce tour.';
   byId('combat-tip').textContent = run.enemy <= strike
     ? 'Attaque ! Tu peux le battre avant qu’il riposte.'
-    : hit ? 'Conseil : protège-toi pour bloquer son coup.' : 'Conseil : profite de la pause pour attaquer !';
+    : hit ? (hasShield() ? 'Conseil : lève ton bouclier pour réduire le coup.' : 'Conseil : pare à l’épée pour réduire le coup.') : 'Conseil : profite de la pause pour attaquer !';
   return true;
 }
 function render(focus = false) {

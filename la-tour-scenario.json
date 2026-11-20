@@ -1,7 +1,37 @@
 {
   "version": 1,
-  "rooms": {},
-  "passages": [],
+  "rooms": {
+    "salle-mwp2zyet-eyiru": {
+      "title": "Salle secrete",
+      "story": "Tu découvres une salle encore inexplorée."
+    }
+  },
+  "passages": [
+    {
+      "to": "salle-mwp2zyet-eyiru",
+      "label": "Pousser le rayonnage",
+      "requires": "",
+      "transition": "Le rayonnage pivote et révèle un passage.",
+      "from": "library"
+    },
+    {
+      "from": "salle-mwp2zyet-eyiru",
+      "to": "treasure",
+      "label": "Ouvrir la porte secrete",
+      "requires": "",
+      "transition": "La pierre pivote"
+    }
+  ],
+  "roomItems": {
+    "salle-mwp2zyet-eyiru": [
+      {
+        "id": "objet-mwp30tzn-0jikptz7uz2l",
+        "name": "Bouclier",
+        "icon": "🎒",
+        "description": "Bouclier rare en acier"
+      }
+    ]
+  },
   "monsters": {
     "sentry": {
       "name": "La sentinelle à ressort",

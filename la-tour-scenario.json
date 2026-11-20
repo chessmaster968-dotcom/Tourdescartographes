@@ -10,7 +10,7 @@
     {
       "to": "salle-mwp2zyet-eyiru",
       "label": "Pousser le rayonnage",
-      "requires": "",
+      "requires": "ally",
       "transition": "Le rayonnage pivote et révèle un passage.",
       "from": "library"
     },

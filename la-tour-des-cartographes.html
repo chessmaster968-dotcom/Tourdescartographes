@@ -152,11 +152,14 @@ const passages = {
 const shieldItemId = 'objet-mwp30tzn-0jikptz7uz2l';
 const hasShield = () => run.pickedItems?.some(item => item.id === shieldItemId) ?? false;
 const shieldRequired = 'Il te faut le bouclier de la salle secrète pour affronter le gardien.';
-const hasGuardianAid = () => run.ally || run.lantern || run.spring;
-function enter(scene, transition, {usedApple = false} = {}) {
+function enter(scene, transition) {
   const previous = run.scene;
-  if (!hasShield() && (scene === 'guardian' || (scene === 'win' && previous === 'guardian'))) {
+  if (!hasShield() && (scene === 'guardian' || scene === 'win')) {
     run.message = shieldRequired;
+    return;
+  }
+  if (scene === 'win' && (previous !== 'guardian' || run.enemy > 0)) {
+    run.message = 'Bats le gardien pour atteindre le sommet.';
     return;
   }
   const trail = run.trail ??= ['camp', ...(previous === 'camp' ? [] : [previous])];
@@ -174,16 +177,9 @@ function enter(scene, transition, {usedApple = false} = {}) {
   run.scene = scene;
   run.message = transition || passages[previous + '/' + scene] || 'Tu passes à l’étape suivante et prends un instant pour observer les lieux.';
   if (scene === 'guardian') {
-    run.unprepared = !hasGuardianAid() && !usedApple;
+    run.unprepared = false;
     run.enemy = scenario.monsters.guardian.hp;
-    if (run.unprepared) {
-      const damage = Math.min(2, Math.max(0, run.hp - 1));
-      run.hp -= damage;
-      run.enemy += 2;
-      run.message += ' Le golem jaillit de l’ombre et te projette contre la rampe. '
-        + (damage ? 'Tu perds ' + damage + (damage === 1 ? ' cœur. ' : ' cœurs. ') : 'Tu tiens debout de justesse. ')
-        + 'Il rabat ses plaques de cuivre pour se protéger (+2 énergie).';
-    }
+    run.guardianAid = {};
     run.turn = 0;
   }
   if (scene === 'sentry') { run.enemy = scenario.monsters.sentry.hp; run.turn = 0; }
@@ -198,7 +194,7 @@ function previousRoomIndex() {
   const trail = run.trail ?? ['camp', run.scene];
   const rooms = roomIds();
   for (let index = trail.length - 2; index >= 0; index--) {
-    if (trail[index] !== run.scene && rooms.includes(trail[index])) return index;
+    if (trail[index] !== run.scene && rooms.includes(trail[index]) && (trail[index] !== 'win' || hasShield())) return index;
   }
   return -1;
 }
@@ -223,41 +219,52 @@ const puzzles = [
   { question: 'Les cadrans affichent 2, 5, 9, 14. Quel nombre faut-il entrer ensuite ?', hint: 'Observe de combien le nombre augmente à chaque fois.', choices: [18, 20, 21], answer: 20 },
   { question: 'La lune vient juste après le soleil. L’étoile est en dernier. Quel symbole vient en premier ?', hint: 'Place d’abord l’étoile, puis les deux autres symboles côte à côte.', choices: ['La lune', 'L’étoile', 'Le soleil'], answer: 'Le soleil' }
 ];
+const damageAfterDefense = (attack, defense) => Math.max(0, attack - defense);
+const calculation = (attack, defense) => attack + ' − ' + defense + ' = ' + damageAfterDefense(attack, defense);
 function combatTurn(guard) {
   const monster = scenario.monsters[guard ? 'guardian' : 'sentry'];
   const phase = run.turn % (guard ? 3 : 2);
-  const hit = guard ? [monster.damage, 0, 1][phase] : [0, monster.damage][phase];
-  const blocked = Math.min(hit, hasShield() ? 3 : 1);
+  const attack = guard ? [monster.damage, monster.damage + 2, 0][phase] : [0, monster.damage][phase];
+  const defense = guard ? [1, 1, 0][phase] : [0, 2][phase];
   return {
-    hit,
-    blocked,
-    strike: (guard ? phase === 1 : phase === 0) ? 3 : 1
+    monsterAttack: guard && run.guardianAid?.dazzled ? Math.max(0, attack - 2) : attack,
+    monsterDefense: guard && run.guardianAid?.exposed ? 0 : defense,
+    heroAttack: 3,
+    heroDefense: hasShield() ? 2 : 0,
+    guardDefense: hasShield() ? 4 : 1,
+    charged: guard && phase === 1
   };
 }
 function combat(action) {
   const guard = run.scene === 'guardian';
-  const {hit, blocked, strike} = combatTurn(guard);
-  if (action === 'strike') run.enemy -= strike;
+  if (guard && !hasShield()) return;
+  const turn = combatTurn(guard);
+  const guarding = action === 'defend';
+  const attack = action === 'item' ? scenario.objects.spring.power : turn.heroAttack;
+  if (action === 'item') run.spring = false;
+  if (!guarding) run.enemy -= damageAfterDefense(attack, turn.monsterDefense);
+  if (guard && run.guardianAid) {
+    if (!guarding) run.guardianAid.exposed = false;
+    run.guardianAid.dazzled = false;
+  }
   if (run.enemy <= 0) {
-    const finish = action === 'item' ? 'Le ressort se détend d’un coup.' : 'Ton dernier coup atteint le mécanisme.';
-    enter(guard ? 'win' : 'pip', finish + (guard
-      ? ' Le gardien ploie et ses verrous se rétractent, libérant la porte du sommet.'
-      : ' La sentinelle vacille. Derrière elle, une petite main de cuivre dépasse de la roue.'));
+    enter(guard ? 'win' : 'pip', guard
+      ? 'Ton coup fait tomber le gardien. Les verrous du sommet s’ouvrent.'
+      : 'La sentinelle vacille. Derrière elle, une petite main de cuivre dépasse de la roue.');
     return;
   }
-  const damage = action === 'defend' ? hit - blocked : hit;
-  run.hp -= damage;
+  const defense = guarding ? turn.guardDefense : turn.heroDefense;
+  run.hp -= damageAfterDefense(turn.monsterAttack, defense);
+  const counter = ' Riposte : ' + calculation(turn.monsterAttack, defense) + ' PV perdus.';
+  const result = guarding
+    ? 'Tu te protèges.'
+    : (action === 'item' ? 'Ressort : ' : 'Épée : ') + calculation(attack, turn.monsterDefense) + ' PV retirés au monstre.';
   if (run.hp <= 0) {
-    enter('lost', 'Le choc te fait lâcher ton épée. Tu la ramasses et redescends en t’appuyant contre le mur, jusqu’à retrouver la lumière du camp.');
+    enter('lost', result + counter + ' Tu regagnes le camp.');
     return;
   }
   run.turn++;
-  const result = action === 'strike'
-    ? 'Tu retires ' + strike + (strike === 1 ? ' point de vie au monstre.' : ' points de vie au monstre.')
-    : action === 'item' ? 'Le ressort jaillit et frappe le mécanisme. ' + scenario.objects.spring.power + ' dégâts.'
-    : hit ? (hasShield() ? 'Ton bouclier' : 'Ta parade à l’épée') + ' bloque ' + blocked + ' point' + (blocked > 1 ? 's' : '') + ' du coup.'
-    : 'Tu te protèges et attends la suite.';
-  run.message = result + (damage ? ' Tu perds ' + damage + (damage === 1 ? ' cœur.' : ' cœurs.') : action === 'defend' && hit ? ' Tu gardes tous tes cœurs.' : '');
+  run.message = result + counter;
 }
 const option = (label, act, detail) => ({ label, act, detail });
 function start(keepCampItems = false) {
@@ -313,7 +320,7 @@ const scenes = {
   ]],
   treasure: () => ['Le palier', 'Le coffre du voyageur', 'Le coffre contient deux objets. Le mécanisme ne te laisse prendre qu’un seul trésor.', '🧰', [
     option('Prendre · ' + scenario.objects.spring.name, () => { run.treasureTaken = true; run.spring = true; enter('guardian', 'Tu ranges ton choix dans ton sac (' + scenario.objects.spring.name + '). Le coffre se referme et tu gravis les dernières marches jusqu’au gardien.'); }, 'Inflige ' + scenario.objects.spring.power + ' dégâts en un tour. Usage unique.'),
-    option('Utiliser · ' + scenario.objects.apple.name, () => { run.treasureTaken = true; const before = run.hp; run.hp = Math.min(7, run.hp + scenario.objects.apple.power); const gained = run.hp - before; enter('guardian', 'Tu savoures ton choix (' + scenario.objects.apple.name + '). ' + (gained ? 'Tu récupères ' + gained + (gained === 1 ? ' cœur. ' : ' cœurs. ') : 'Tu as déjà tous tes cœurs. ') + 'Un bruit de pas lourds t’attend en haut des marches.', {usedApple: true}); }, 'Rend ' + scenario.objects.apple.power + ' cœurs, jusqu’à 7.'),
+    option('Utiliser · ' + scenario.objects.apple.name, () => { run.treasureTaken = true; const before = run.hp; run.hp = Math.min(7, run.hp + scenario.objects.apple.power); const gained = run.hp - before; enter('guardian', 'Tu savoures ton choix (' + scenario.objects.apple.name + '). ' + (gained ? 'Tu récupères ' + gained + (gained === 1 ? ' cœur. ' : ' cœurs. ') : 'Tu as déjà tous tes cœurs. ') + 'Un bruit de pas lourds t’attend en haut des marches.'); }, 'Rend ' + scenario.objects.apple.power + ' cœurs, jusqu’à 7.'),
     option('Laisser le coffre et monter', () => enter('guardian', 'Tu laisses le coffre fermé et gravis les marches, l’épée à la main.'))
   ]],
   win: () => ['Le sommet', 'Le premier fragment', 'Dans la chambre du sommet, une carte attend sur un pupitre. Un point y brille sous la rivière. La tour vient de te révéler le chemin vers une autre aventure.', '🗺️', [
@@ -334,23 +341,31 @@ function encounter(guard) {
       option('Poursuivre', () => enter(guard ? 'win' : 'pip', 'Tu empruntes le passage désormais libre.'))
     ]];
   }
-  const {hit, blocked, strike} = combatTurn(guard);
+  const turn = combatTurn(guard);
   const defense = hasShield() ? '🛡️ Lever le bouclier' : '⚔️ Parer à l’épée';
-  const remaining = hit - blocked;
-  const protection = blocked + ' point' + (blocked > 1 ? 's bloqués.' : ' bloqué.');
+  const attackDetail = attack => 'Monstre : ' + calculation(attack, turn.monsterDefense) + ' PV perdus. '
+    + (damageAfterDefense(attack, turn.monsterDefense) >= run.enemy
+      ? 'Tu gagnes avant sa riposte.'
+      : 'Toi : ' + calculation(turn.monsterAttack, turn.heroDefense) + ' PV perdus.');
   const actions = [
-    option('⚔️ Attaquer', () => combat('strike'), 'Tu retires ' + strike + ' PV au monstre.'),
-    option(defense, () => combat('defend'), hit
-      ? protection + (remaining ? ' Tu perds quand même ' + remaining + (remaining > 1 ? ' cœurs.' : ' cœur.') : ' Tu gardes tous tes cœurs.')
-      : 'Tu attends un tour sans attaquer.')
+    option('⚔️ Attaquer', () => combat('strike'), attackDetail(turn.heroAttack)),
+    option(defense, () => combat('defend'), 'Toi : ' + calculation(turn.monsterAttack, turn.guardDefense) + ' PV perdus. Tu passes ton attaque.')
   ];
-  if (guard && run.ally) actions.unshift(option('Demander à Pip d’actionner le levier', () => enter('win', 'Pip se faufile derrière le gardien. « Celui-ci, je le connais. » Il abaisse le levier. Le gardien se fige et la porte s’entrouvre.'), 'Pip connaît le mécanisme du gardien.'));
-  if (guard && run.lantern) actions.unshift(option('Éclairer la serrure du gardien', () => enter('win', 'Dans la lumière bleue, trois symboles apparaissent sur la serrure. Tu les effleures dans l’ordre de leurs pulsations. Les verrous cèdent un à un.'), 'La lumière bleue révèle les symboles qui ouvrent la porte.'));
-  if (guard && run.spring) actions.push(option('Déclencher le ressort', () => {
-    run.spring = false;
-    run.enemy -= scenario.objects.spring.power;
-    combat('item');
-  }, 'Inflige ' + scenario.objects.spring.power + ' dégâts. Le gardien joue son tour s’il tient encore debout.'));
+  if (guard && run.ally && !run.guardianAid?.pipUsed) {
+    actions.push(option('Demander l’aide de Pip', () => {
+      const aid = run.guardianAid ??= {};
+      aid.pipUsed = aid.exposed = true;
+      run.message = 'Pip ouvre une plaque. Le gardien a 0 défense jusqu’à ton prochain coup.';
+    }, 'Défense du gardien à 0 pour ton prochain coup. Une fois par combat.'));
+  }
+  if (guard && run.lantern && !run.guardianAid?.lanternUsed) {
+    actions.push(option('Braquer la lanterne', () => {
+      const aid = run.guardianAid ??= {};
+      aid.lanternUsed = aid.dazzled = true;
+      run.message = 'La lumière éblouit le gardien. Il perd 2 points d’attaque pour ce tour.';
+    }, 'Réduit de 2 l’attaque du gardien ce tour. Une fois par combat.'));
+  }
+  if (guard && run.spring) actions.push(option('Déclencher le ressort', () => combat('item'), attackDetail(scenario.objects.spring.power)));
   return [guard ? 'Le sommet · Devant la porte' : 'L’atelier · Près de l’établi', scenario.monsters[guard ? 'guardian' : 'sentry'].name,
     '', guard ? '🦉' : '⚙️', actions];
 }
@@ -406,7 +421,7 @@ const defaults = {
     "guardian": {
       "name": "Le gardien de cuivre",
       "hp": 6,
-      "damage": 2
+      "damage": 4
     }
   },
   "objects": {
@@ -858,7 +873,7 @@ function renderCombat() {
 
   const guard = run.scene === 'guardian';
   const monster = scenario.monsters[run.scene];
-  const {hit, strike} = combatTurn(guard);
+  const turn = combatTurn(guard);
   const maxEnemyLife = Math.max(run.enemy, monster.hp + (guard && run.unprepared ? 2 : 0));
   const life = (id, current, max) => {
     byId(id + '-life').textContent = current + ' / ' + max + ' PV';
@@ -879,12 +894,14 @@ function renderCombat() {
     return item;
   }));
 
-  byId('monster-intent').textContent = hit
-    ? 'Le monstre prépare un coup. Il peut te retirer ' + hit + (hit === 1 ? ' cœur.' : ' cœurs.')
-    : 'Le monstre se prépare. Il ne t’attaquera pas ce tour.';
-  byId('combat-tip').textContent = run.enemy <= strike
+  byId('monster-intent').textContent = turn.monsterAttack
+    ? (turn.charged ? 'Coup chargé !' : 'Le monstre prépare un coup.') + ' Attaque ' + turn.monsterAttack + ' · Défense ' + turn.monsterDefense + '.'
+    : 'Pas de riposte ce tour. Attaque 0 · Défense ' + turn.monsterDefense + '.';
+  const strike = damageAfterDefense(turn.heroAttack, turn.monsterDefense);
+  byId('combat-tip').textContent = strike >= run.enemy
     ? 'Attaque ! Tu peux le battre avant qu’il riposte.'
-    : hit ? (hasShield() ? 'Conseil : lève ton bouclier pour réduire le coup.' : 'Conseil : pare à l’épée pour réduire le coup.') : 'Conseil : profite de la pause pour attaquer !';
+    : turn.charged && turn.monsterAttack ? 'Conseil : lève ton bouclier contre le coup chargé.'
+      : 'Tes dégâts et ceux du monstre se calculent en soustrayant la défense à l’attaque.';
   return true;
 }
 function render(focus = false) {

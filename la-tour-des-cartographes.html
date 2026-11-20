@@ -318,11 +318,28 @@ const scenes = {
     }),
     option('Poursuivre vers le sommet', () => enter('treasure'))
   ]],
-  treasure: () => ['Le palier', 'Le coffre du voyageur', 'Le coffre contient deux objets. Le mécanisme ne te laisse prendre qu’un seul trésor.', '🧰', [
-    option('Prendre · ' + scenario.objects.spring.name, () => { run.treasureTaken = true; run.spring = true; enter('guardian', 'Tu ranges ton choix dans ton sac (' + scenario.objects.spring.name + '). Le coffre se referme et tu gravis les dernières marches jusqu’au gardien.'); }, 'Inflige ' + scenario.objects.spring.power + ' dégâts en un tour. Usage unique.'),
-    option('Utiliser · ' + scenario.objects.apple.name, () => { run.treasureTaken = true; const before = run.hp; run.hp = Math.min(7, run.hp + scenario.objects.apple.power); const gained = run.hp - before; enter('guardian', 'Tu savoures ton choix (' + scenario.objects.apple.name + '). ' + (gained ? 'Tu récupères ' + gained + (gained === 1 ? ' cœur. ' : ' cœurs. ') : 'Tu as déjà tous tes cœurs. ') + 'Un bruit de pas lourds t’attend en haut des marches.'); }, 'Rend ' + scenario.objects.apple.power + ' cœurs, jusqu’à 7.'),
-    option('Laisser le coffre et monter', () => enter('guardian', 'Tu laisses le coffre fermé et gravis les marches, l’épée à la main.'))
-  ]],
+  treasure: () => {
+    const taken = run.treasureTaken || run.spring;
+    const {spring, apple} = scenario.objects;
+    const choices = taken ? [] : [
+      option('Prendre · ' + spring.name, () => {
+        run.treasureTaken = true;
+        run.spring = true;
+        run.message = 'Tu ranges le ressort dans ton inventaire. Le coffre se referme.';
+      }, 'Attaque ' + spring.power + ' au combat. Usage unique.'),
+      option('Utiliser · ' + apple.name, () => {
+        run.treasureTaken = true;
+        const hp = run.hp;
+        run.hp = Math.min(7, hp + apple.power);
+        const gained = run.hp - hp;
+        run.message = gained ? 'Tu récupères ' + gained + (gained === 1 ? ' cœur.' : ' cœurs.') : 'Tu as déjà tous tes cœurs.';
+      }, 'Rend jusqu’à ' + apple.power + ' cœurs, sans dépasser 7.')
+    ];
+    if (hasShield()) choices.push(option('Monter affronter le gardien', () => enter('guardian', 'Tu gravis les dernières marches jusqu’au gardien.')));
+    return ['Le palier', 'Le coffre du voyageur', taken
+      ? 'Le coffre est refermé. L’escalier mène au sommet.'
+      : 'Le coffre contient deux objets. Le mécanisme ne te laisse prendre qu’un seul trésor.', '🧰', choices];
+  },
   win: () => ['Le sommet', 'Le premier fragment', 'Dans la chambre du sommet, une carte attend sur un pupitre. Un point y brille sous la rivière. La tour vient de te révéler le chemin vers une autre aventure.', '🗺️', [
     option('Repartir explorer la tour', start),
     option('Retourner au camp', () => enter('camp'))
@@ -490,18 +507,15 @@ const editableLinks = id => !['sentry','guardian','puzzle','win','lost'].include
 function roomView() {
   const custom = scenario.rooms[run.scene];
   const view = builtIn.includes(run.scene) ? scenes[run.scene]() : ['La tour', custom.title, custom.story, '✦', []];
-  if (run.scene === 'treasure' && (run.treasureTaken || run.spring)) {
-    view[2] = 'Le coffre est refermé. L’escalier mène au sommet.';
-    view[4] = [option('Monter au sommet', () => enter('guardian'))];
-  }
   if (custom) {
     view[1] = custom.title;
     view[2] = custom.story;
     if (run.scene === 'puzzle') view[2] += ' ' + scenes[run.scene]()[2];
   }
   if (run.scene === 'treasure' && !hasShield()) {
-    view[2] += ' ' + shieldRequired;
-    view[4] = [];
+    view[2] += ' ' + shieldRequired + (run.ally
+      ? ' Avec Pip, pousse le rayonnage de la bibliothèque.'
+      : ' Va chercher Pip dans l’atelier, puis emmène-le à la bibliothèque.');
   }
   for (const link of scenario.passages) {
     if (link.from === run.scene && editableLinks(link.from) && (!link.requires || run[link.requires])) {
